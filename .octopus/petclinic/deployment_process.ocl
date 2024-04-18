@@ -1,0 +1,178 @@
+step "approve-production-deployment" {
+    condition = "Variable"
+    name = "Approve Production Deployment"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Manual"
+        environments = ["production"]
+        is_required = true
+        notes = "Require approval from someone with the appropriate permissions."
+        properties = {
+            Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+            Octopus.Action.Manual.Instructions = "Please add approval notes here."
+        }
+    }
+}
+
+step "check-for-namespace" {
+    name = "Check for namespace (Azure discovery)"
+    properties = {
+        Octopus.Action.TargetRoles = "demo-k8s-cluster"
+    }
+
+    action {
+        action_type = "Octopus.KubernetesRunScript"
+        notes = <<-EOT
+                Create the target namespace if it does not exist.
+                
+                This step does cloud target discovery for AKS clusters.
+                EOT
+        properties = {
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Get existing namespaces
+                Write-Host "Retrieving namespaces ..."
+                $namespaces = (kubectl get namespaces -o JSON | ConvertFrom-Json)
+                
+                # Check to see if namespace exists
+                if ($null -eq ($namespaces.Items | Where-Object {$_.metadata.name -eq $OctopusParameters["PetClinic.Cluster.Namespace"]}))
+                {
+                	# Create the namespace
+                    Write-Host "Namespace #{PetClinic.Cluster.Namespace} doesn't exist, creating ..."
+                    kubectl create namespace $OctopusParameters["PetClinic.Cluster.Namespace"]
+                }
+                else
+                {
+                	Write-Host "Namespace #{PetClinic.Cluster.Namespace} already exists, moving on ..."
+                }
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool_variable = "PetClinic.WorkerPool.Azure"
+    }
+}
+
+step "check-for-namespace-aws-discovery" {
+    name = "Check for namespace (AWS discovery)"
+    properties = {
+        Octopus.Action.TargetRoles = "demo-k8s-cluster"
+    }
+
+    action {
+        action_type = "Octopus.KubernetesRunScript"
+        is_disabled = true
+        notes = <<-EOT
+                Create the target namespace if it does not exist.
+                
+                This step does cloud target discovery for EKS clusters.
+                EOT
+        properties = {
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Get existing namespaces
+                Write-Host "Retrieving namespaces ..."
+                $namespaces = (kubectl get namespaces -o JSON | ConvertFrom-Json)
+                
+                # Check to see if namespace exists
+                if ($null -eq ($namespaces.Items | Where-Object {$_.metadata.name -eq $OctopusParameters["PetClinic.Cluster.Namespace"]}))
+                {
+                	# Create the namespace
+                    Write-Host "Namespace #{PetClinic.Cluster.Namespace} doesn't exist, creating ..."
+                    kubectl create namespace $OctopusParameters["PetClinic.Cluster.Namespace"]
+                }
+                else
+                {
+                	Write-Host "Namespace #{PetClinic.Cluster.Namespace} already exists, moving on ..."
+                }
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool_variable = "PetClinic.WorkerPool.AWS"
+    }
+}
+
+step "deploy-petclinic-helm-chart" {
+    name = "Deploy PetClinic Helm Chart"
+    properties = {
+        Octopus.Action.TargetRoles = "demo-k8s-cluster"
+    }
+
+    action {
+        action_type = "Octopus.HelmChartUpgrade"
+        notes = "Deploy the PetClinic Helm Chart to the K8s cluster."
+        properties = {
+            Octopus.Action.Helm.ClientVersion = "V3"
+            Octopus.Action.Helm.Namespace = "#{PetClinic.Cluster.Namespace}"
+            Octopus.Action.Helm.ResetValues = "True"
+            Octopus.Action.Helm.YamlValues = <<-EOT
+                databaseimage:
+                  repository: mysql
+                  pullPolicy: IfNotPresent
+                  tag: "latest"
+                  metadataName: "mysql"
+                  credentials:
+                    root:
+                      username: "root"
+                      password: "#{PetClinic.MySQL.Root.Password}"
+                    petclinic:
+                      username: "petclinic"
+                      password: "#{PetClinic.MySQL.PetClinic.Password}"
+                  memoryRequest: "#{Project.Container.MySql.Memory.Request}"
+                  memoryLimit: "#{Project.Container.MySql.Memory.Limit}"
+                webimage:
+                  tag: "#{Octopus.Action.Package[petclinic-web].PackageVersion}"
+                  memoryRequest: "#{Project.Container.Web.Memory.Request}"
+                  memoryLimit: "#{Project.Container.Web.Memory.Limit}"
+                      
+                EOT
+            Octopus.Action.Package.DownloadOnTentacle = "False"
+            Octopus.Action.Package.FeedId = "octopus-server-built-in"
+            Octopus.Action.Package.PackageId = "petclinic-chart"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "PetClinic.WorkerPool.Azure"
+
+        packages {
+            acquisition_location = "Server"
+            feed = "octopus-server-built-in"
+            package_id = "petclinic-chart"
+            properties = {
+                SelectionMode = "immediate"
+            }
+        }
+
+        packages "petclinic-web" {
+            acquisition_location = "NotAcquired"
+            feed = "docker-hub"
+            package_id = "octopussamples/petclinic-web"
+            properties = {
+                Extract = "False"
+                Purpose = "DockerImageReference"
+                SelectionMode = "immediate"
+            }
+        }
+    }
+}
+
+step "send-completion-notification" {
+    condition = "Variable"
+    name = "Send Completion Notification"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Email"
+        environments = ["production"]
+        notes = "Email the deployer that the deployment has been completed."
+        properties = {
+            Octopus.Action.Email.Body = "#{Octopus.Release.Notes}"
+            Octopus.Action.Email.IsHtml = "True"
+            Octopus.Action.Email.Subject = "Release #{Octopus.Release.Number} has been deployed to #{Octopus.Environment.Name}"
+            Octopus.Action.Email.To = "#{Octopus.Deployment.CreatedBy.EmailAddress}"
+        }
+    }
+}

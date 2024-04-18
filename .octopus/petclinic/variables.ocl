@@ -1,0 +1,54 @@
+variable "Octopus.Aws.Regions" {
+    value "us-east-2" {
+        action = ["check-for-namespace-aws-discovery"]
+    }
+}
+
+variable "Octopus.Azure.Account" {
+    type = "AzureAccount"
+
+    value "octopetshop-azure-subscription" {
+        action = ["check-for-namespace"]
+        description = ""
+    }
+}
+
+variable "PetClinic.CleanedEnvironmentName" {
+    value "#{Octopus.Environment.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "PetClinic.CleanedSpaceName" {
+    value "#{Octopus.Space.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "PetClinic.Cluster.Namespace" {
+    value "#{PetClinic.CleanedSpaceName}-#{PetClinic.CleanedEnvironmentName}" {}
+}
+
+variable "PetClinic.WorkerPool.AWS" {
+    type = "WorkerPool"
+
+    value "aws-worker-pool" {}
+}
+
+variable "PetClinic.WorkerPool.Azure" {
+    type = "WorkerPool"
+
+    value "azure-worker-pool" {}
+}
+
+variable "Project.Container.MySql.Memory.Limit" {
+    value "1000Mi" {}
+}
+
+variable "Project.Container.MySql.Memory.Request" {
+    value "10Mi" {}
+}
+
+variable "Project.Container.Web.Memory.Limit" {
+    value "500Mi" {}
+}
+
+variable "Project.Container.Web.Memory.Request" {
+    value "10Mi" {}
+}
