@@ -1,0 +1,64 @@
+step "create-web-app-service" {
+    name = "Create Goji service"
+    properties = {
+        Octopus.Action.TargetRoles = "demo-k8s-cluster"
+    }
+
+    action "create-goji-service" {
+        action_type = "Octopus.KubernetesDeployRawYaml"
+        notes = "Create a Load Balancer service for the web app on the target cluster."
+        properties = {
+            Octopus.Action.KubernetesContainers.CustomResourceYaml = <<-EOT
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: '#{Goji.WebApp.ServiceName}'
+                  namespace: '#{Goji.Cluster.Namespace}'
+                spec:
+                  type: LoadBalancer
+                  ports:
+                    - name: http
+                      port: 80
+                      targetPort: #{Goji.WebApp.HttpPort}
+                      protocol: TCP
+                    - name: https
+                      port: 443
+                      targetPort: #{Goji.WebApp.HttpsPort}
+                      protocol: TCP
+                  selector:
+                    component: g-web
+                    type: main
+                
+                EOT
+            Octopus.Action.KubernetesContainers.Namespace = "#{Goji.Cluster.Namespace}"
+            Octopus.Action.Script.ScriptSource = "Inline"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool = "hosted-windows"
+
+        container {
+            feed = "docker-hub"
+            image = "octopusdeploy/worker-tools:3.3.2-windows.ltsc2019"
+        }
+    }
+}
+
+step "send-completion-notification" {
+    condition = "Variable"
+    name = "Send Completion Notification"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Email"
+        environments = ["production"]
+        notes = "Email the deployer that the deployment has been completed."
+        properties = {
+            Octopus.Action.Email.Body = "#{Octopus.Release.Notes}"
+            Octopus.Action.Email.IsHtml = "True"
+            Octopus.Action.Email.Subject = "Release #{Octopus.Release.Number} has been deployed to #{Octopus.Environment.Name}"
+            Octopus.Action.Email.To = "#{Octopus.Deployment.CreatedBy.EmailAddress}"
+        }
+    }
+}
