@@ -127,7 +127,8 @@ step "deploy-petclinic-helm-chart" {
                   tag: "#{Octopus.Action.Package[petclinic-web].PackageVersion}"
                   memoryRequest: "#{Project.Container.Web.Memory.Request}"
                   memoryLimit: "#{Project.Container.Web.Memory.Limit}"
-                      
+                ingress:
+                  enabled: false
                 EOT
             Octopus.Action.Package.DownloadOnTentacle = "False"
             Octopus.Action.Package.FeedId = "octopus-server-built-in"
